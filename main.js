@@ -6,6 +6,8 @@ const readline = require("readline").createInterface({
     output: process.stdout
 });
 let keyfilePath = path.join(__dirname,"keyfile.txt");
+const fetch = require("node-fetch");
+const asciify = require("asciify-image");
 
 
 //parsing and getting command line arguments
@@ -133,11 +135,14 @@ let getClient = async function(){
 
 
 
+
+
 let main = async function(){
     let param = getParam();
     let images;
     let options = {page:1};
     
+    let takes = 0;
     //getting authenticated
     while(true){//keep doing this until success
         try{
@@ -148,18 +153,28 @@ let main = async function(){
                 console.log("API keys you entered had been rejected");
                 throw err;
             }
-            console.log(images);
-            console.log(images.length);
             break;
         }catch(err){
             console.log(err);
             await requestUserInputKeys();
-            //break;
+            takes++;
+            if(takes > 5){
+                console.log("something must be going wrong, please re-start this program and try again");
+                process.exit(1);
+            }//break;
             //continue the loop until success
         }
     }
-    
+    console.log(images.length);
     //getting the image
+    let str = await asciify(images[0].thumbnail, {
+        fit:    'box',
+        width:  100,
+        height: 50
+    });
+    console.log(str);
+    
+    //cleaning up
     readline.close();
     console.log("program successfully completed");
 };
