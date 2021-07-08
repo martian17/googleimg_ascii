@@ -1,44 +1,23 @@
 const imageSearch = require("image-search-google");
 const fs = require("fs");
+const path = require("path");
 const readline = require("readline").createInterface({
     input: process.stdin,
     output: process.stdout
 });
+let keyfilePath = path.join(__dirname,"keyfile.txt");
 
-console.log(process.argv);
 
-let filestat = function(){
-    return new Promise((res,rej)=>{
-        fs.stat(name,function(err,stats){
-            resolve([err,stats]);
-        });
-    });
-}
-let exist = async function(){
-    let [err,stats] = await filestat(name);
-    if(err){
-        if(err.code === "ENOENT"){
-            //create a new file
-            
-        }else{
-            throw err;
-        }
+//parsing and getting command line arguments
+let getParam = function(){
+    let param = process.argv[2];
+    if(!param){
+        console.log("usage: node main.js \"search param\"");
+        process.exit();
+        return false;
     }
-    
-    fs.stat(name,function(err,stats){
-        if(err){
-            if(err.code === "ENOENT"){
-                //create a new file
-                
-            }else{
-                throw err;
-            }
-        }else{
-            
-        }
-    });
-}
-
+    return param;
+};
 
 let readTextFile = function(name){
     return new Promise((res,rej)=>{
@@ -46,7 +25,7 @@ let readTextFile = function(name){
             if (err){
                 if(err.code === "ENOENT"){
                     res(false);
-                }else{
+                }else{//error that I can't handle
                     rej(err);
                 }
             }else{
@@ -56,89 +35,133 @@ let readTextFile = function(name){
     });
 };
 
-let requestUserInput = function(question){
+let writeTextFile = function(name,content){
     return new Promise((res,rej)=>{
-        readline.question(question, (reply)=>{
-            readline.close();
-            res(reply);
+        fs.writeFile(keyfilePath, content, err => {
+            if(err){
+                rej(err);
+            }
+            res();
         });
     });
 };
 
-let writeFile = function(name,content){
+let requestUserInput = function(question){
     return new Promise((res,rej)=>{
-        fs.writeFile(name, content, (err) => {
-            if (err){
-                rej(err);
+        readline.question(question, (reply)=>{
+            if(!reply){
+                process.stdout.write("\r                                         \033[F");
+                requestUserInput(question).then((reply1)=>{
+                    res(reply1);
+                }).catch((err)=>{
+                    rej(err);
+                });
             }else{
-                res();
+                res(reply);
             }
         });
     });
 };
 
-let requestAndSaveUserKey = async function(filename){
-    //create file and read user input
-    console.log("Please enter your google CSE ID and API KEY. You won't need to do this from the second time.");
-    let id = await requestUserInput("CSE ID: ");
-    let key = await requestUserInput("API KEY: ");
-    writeFile(filename,JSON.stringify([id.trim(),key.trim()]));
+let verifyIdKey = function([key,id]){
+    if(!key || !id){
+        return false;
+    }
+    return true;
 };
 
-let getIDKEY = async function(){
-    let data;
-    let filename = "";
-    try{
-        while(true){
-            
+let failcnt = 0;
+let requestUserInputKeys = async function(){
+    while(true){
+        console.log("Please input your CSE ID and API key.");
+        /*if(failcnt === 0){
+            console.log("Please input your CSE ID and API key.");
+        }else{
+            console.log("Your input was not correctly formatted. Please enter it again.");
+        }*/
+        let id = await requestUserInput("CSE ID: ");
+        let key = await requestUserInput("API KEY: ");
+        if(verifyIdKey([id,key])){
+            failcnt++;
+            //write the keys as json
+            try{
+                await writeTextFile(keyfilePath,JSON.stringify([id,key]));
+            }catch(err){
+                console.log("error writing to the keyfile.txt");
+            }
+            return [id,key];
+        }else{
+            continue;
         }
-        let data = readTextFile(filename);
-        if(!data){//file does not exist
-            requestAndSaveUserKey(filename);
-            data = readTextFile(filename);
-        }
-        let vals;
-        try{
-            let vals = JSON.stringify(data);
-        }catch()
-        return 
-    }catch(err){
-        console.log(err);
-        console.log("the key file may be corrupted. try removing ./keyfile and execute this command again.");
     }
 };
 
-let displayHelp = function(){
-    console.log(
-`Usage: node img.js "search params"`
-    );
-}
+let handleKeyfileExists = async function(file){
+    let id,key;
+    let successFlag = true; 
+    try{
+        [id,key] = JSON.parse(file);
+    }catch(err){
+        successFlag = false;
+    }
+    if(successFlag || verifyIdKey([id,key])){
+        return [id,key];
+    }else{
+        console.log("Your keyfile.txt exists but seems to be corrupted. please enter your id and key.");
+        return await requestUserInputKeys();
+    }
+};
+
+let getAPIkeys = async function(){
+    let id,key,file;
+    file = await readTextFile(keyfilePath);
+    if(!file){//file dne
+        [id,key] = await requestUserInputKeys();
+    }else{
+        [id,key] = await handleKeyfileExists(file);
+    }
+    return [id,key]
+};
+
+let getClient = async function(){
+    let [id,key] = await getAPIkeys();
+    if(!verifyIdKey([id,key])){
+        throw new Error("The key format is corrupted for some reason");
+    }
+    return new imageSearch(id,key);
+};
+
+
 
 let main = async function(){
-    let [id,key] = await getIDKEY();
-    let param = process.argv[2];
-    if(!param){
-        displayHelp();
-        process.exit(1);
+    let param = getParam();
+    let images;
+    let options = {page:1};
+    
+    //getting authenticated
+    while(true){//keep doing this until success
+        try{
+            let client = await getClient();
+            try{
+                images = await client.search(param, options);
+            }catch(err){
+                console.log("API keys you entered had been rejected");
+                throw err;
+            }
+            console.log(images);
+            console.log(images.length);
+            break;
+        }catch(err){
+            console.log(err);
+            await requestUserInputKeys();
+            //break;
+            //continue the loop until success
+        }
     }
+    
+    //getting the image
+    readline.close();
+    console.log("program successfully completed");
 };
-const client = new imageSearch("CSE ID", "API KEY");
-const options = {page:1};
-client.search("APJ Abdul kalam", options)
-    .then(images => {
-        /*
-        [{
-            'url': item.link,
-            'thumbnail':item.image.thumbnailLink,
-            'snippet':item.title,
-            'context': item.image.contextLink
-        }]
-         */
-    })
-    .catch(error => console.log(error););
- 
-// search for certain size
-client.search('Mahatma Gandhi', {size: 'large'});
- 
-// search for certain type
-client.search('Indira Gandhi', {type: 'face'});
+
+main();
